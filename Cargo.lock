@@ -249,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "scherben-map"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crossbeam",
  "crossbeam-utils 0.8.8",
