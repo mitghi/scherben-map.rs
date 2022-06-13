@@ -9,7 +9,7 @@ repository = "https://github.com/mitghi/scherben-map.rs"
 documentation = "https://github.com/mitghi/scherben-map.rs"
 homepage = "https://github.com/mitghi/scherben-map.rs"
 description = "Concurrent Sharded HashMap for Rust"
-keywords = ["hashmap", "sharded-hashmap", "concurrent-hashmap", "concurrent-sharded-hashmap"]
+keywords = ["hashmap", "sharded-hashmap", "concurrent-hashmap", "thread-safe-hashmap"]
 categories = ["concurrency", "asynchronous", "algorithms"]
 exclude = [".gitignore"]
 
