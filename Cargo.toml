@@ -1,0 +1,24 @@
+[package]
+name = "scherben-map"
+version = "0.1.0"
+edition = "2021"
+authors = ["Milad (Mike) Taghavi <mitghi@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/mitghi/scherben-map.rs"
+documentation = "https://github.com/mitghi/scherben-map.rs"
+homepage = "https://github.com/mitghi/scherben-map.rs"
+description = "Concurrent Sharded HashMap for Rust"
+keywords = ["hashmap", "sharded-hashmap", "concurrent-hashmap", "concurrent-sharded-hashmap"]
+categories = ["concurrency", "asynchronous", "algorithms"]
+exclude = [".gitignore"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+hashbrown = {version = "0.12.1", features=["raw", "inline-more"]}
+parking_lot_utils = {package = "parking_lot", version = "0.12.1"}
+fnv = "1.0.7"
+crossbeam-utils = "0.8.8"
+crossbeam = "0.8.1"
+threadpool-crossbeam-channel = "1.8.0"
