@@ -249,12 +249,13 @@ dependencies = [
 
 [[package]]
 name = "scherben-map"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "crossbeam",
  "crossbeam-utils 0.8.8",
  "fnv",
  "hashbrown",
+ "num_cpus",
  "parking_lot",
  "scoped_threadpool",
  "threadpool-crossbeam-channel",
