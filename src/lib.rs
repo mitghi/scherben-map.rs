@@ -183,7 +183,7 @@ impl<'a, K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> HashMap
     where
         K: Hash + Eq + IKey<K>,
     {
-        let mut pool = Pool::new(8);
+        let mut pool = Pool::new(num_cpus::get().try_into().unwrap());
         let (result_tx, result_rx): (Sender<Vec<(K, V)>>, Receiver<Vec<(K, V)>>) = unbounded();
 
         {
