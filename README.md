@@ -39,56 +39,6 @@ fn main() {
 }
 ```
 
-Mutating data from another thread:
-
-```rust
-use scherben_map;
-use std::{
-    self,
-    sync::{Arc, Mutex},
-};
-
-fn main() {
-    let map = scherben_map::HashMap::<String, Arc<Mutex<String>>, 16>::new_arc();
-
-    map.insert(
-        "test".to_string(),
-        Arc::new(Mutex::new("result".to_string())),
-    );
-    {
-        let map_a = map.clone();
-        let map_b = map.clone();
-        let handle_a = std::thread::spawn(move || {
-            match map_a.get_owned("test".to_string()) {
-                Some(result) => {
-                    let mut value = result.lock().unwrap();
-                    value.push_str(" + mutation");
-                    println!("result: {}", &value);
-                }
-                None => println!("found nothing ( from thread A )"),
-            };
-        });
-
-        let handle_b = std::thread::spawn(move || match map_b.get_owned("test".to_string()) {
-            Some(result) => {
-                let value = result.lock().unwrap();
-                println!("result: {}", &value);
-            }
-            None => println!("found nothing ( from thread B )"),
-        });
-
-        handle_a.join().unwrap();
-        handle_b.join().unwrap();
-    }
-
-    if *map.get_owned("test".to_string()).unwrap().lock().unwrap()
-        != "result + mutation".to_string()
-    {
-        panic!("inconsistent state");
-    }
-}
-```
-
 # status
 
 This library in under development.
