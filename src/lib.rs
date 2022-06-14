@@ -1,11 +1,19 @@
-use crossbeam::thread::ScopedJoinHandle;
+use crossbeam::{
+    channel::{bounded, unbounded, Receiver, Sender},
+    select,
+    sync::WaitGroup,
+    thread::ScopedJoinHandle,
+};
 use fnv::FnvHasher;
 use hashbrown::raw::RawTable;
+use scoped_threadpool::Pool;
 use std::{
     borrow::Borrow,
     fmt,
     hash::{Hash, Hasher},
 };
+
+extern crate scoped_threadpool;
 
 type RwLock<T> = parking_lot_utils::RwLock<T>;
 
@@ -180,30 +188,61 @@ impl<'a, K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> HashMap
         self.shards.iter().map(|x| x.read().len()).sum()
     }
 
+    #[rustfmt::skip]
     pub fn keys<'b>(&'b self) -> Vec<K>
     where
         K: Hash + Eq + IKey<K>,
     {
-        let mut result: Vec<K> = Vec::new();
-        _ = crossbeam::scope(|s| {
-            let mut handles: Vec<ScopedJoinHandle<Vec<K>>> = Vec::new();
-            for shard_slot in self.shards.iter() {
-                let shard_handle = shard_slot.clone();
-                let handle = s.spawn(move |_| {
-                    let mut buffer: Vec<K> = Vec::new();
-                    let _shard = shard_handle.read();
-                    (*_shard).fill_keys_into(&mut buffer);
+        let mut pool = Pool::new(8);
+        let (result_tx, result_rx): (Sender<Vec<K>>, Receiver<Vec<K>>) = unbounded();
 
-                    buffer
-                });
-                handles.push(handle);
-            }
-            for handle in handles {
-                result.extend(handle.join().unwrap());
-            }
-        });
+        {
+            let result_tx = result_tx.clone();
+            pool.scoped(move |s| {
+                let (buffer_tx, buffer_rx): (Sender<Vec<K>>, Receiver<Vec<K>>) = bounded(64);
+                let wg = WaitGroup::new();
+                {
+                    let buffer_rx = buffer_rx.clone();
+                    s.execute(move || {
+                        let mut result: Vec<K> = Vec::new();
+                        loop {
+                            select! {
+                                recv(buffer_rx) -> msg => {
+                                    match msg {
+					Ok(value) => result.extend(value),
+					Err(_) => break,
+                                    }
+                                }
+                            }
+                        }
+                        _ = result_tx.send(result);
+                    });
+                }
+                {
+                    for shard_slot in self.shards.iter() {
+                        let wg = wg.clone();
+                        let shard_handle = shard_slot.clone();
+                        let buffer_tx = buffer_tx.clone();
+                        s.execute(move || {
+                            let mut buffer: Vec<K> = Vec::new();
+                            let _shard = shard_handle.read();
+                            (*_shard).fill_keys_into(&mut buffer);
 
-        result
+                            _ = buffer_tx.send(buffer);
+
+                            drop(wg);
+                        });
+                    }
+                }
+                wg.wait();
+                drop(buffer_rx);
+            });
+        }
+
+        match result_rx.recv() {
+            Ok(result) => result,
+            Err(_) => Vec::new(),
+        }
     }
 
     pub fn pairs<'b>(&'b self) -> Vec<(K, V)>
