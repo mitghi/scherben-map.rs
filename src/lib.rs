@@ -2,7 +2,6 @@ use crossbeam::{
     channel::{bounded, unbounded, Receiver, Sender},
     select,
     sync::WaitGroup,
-    thread::ScopedJoinHandle,
 };
 use fnv::FnvHasher;
 use hashbrown::raw::RawTable;
@@ -73,15 +72,6 @@ impl<K: Clone + Send + Sync, V: Clone + Send + Sync> Shard<K, V> {
         match self.table.remove_entry(hash, move |x| key.eq(x.0.borrow())) {
             Some((_, value)) => Some(value),
             None => None,
-        }
-    }
-
-    fn fill_keys_into(&self, buffer: &mut Vec<K>) {
-        unsafe {
-            for entry in self.table.iter() {
-                let value = entry.as_ref().clone();
-                buffer.push(value.0.clone());
-            }
         }
     }
 
@@ -189,22 +179,22 @@ impl<'a, K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> HashMap
     }
 
     #[rustfmt::skip]
-    pub fn keys<'b>(&'b self) -> Vec<K>
+    fn collect<'b>(&'b self) -> Vec<(K, V)>
     where
         K: Hash + Eq + IKey<K>,
     {
         let mut pool = Pool::new(8);
-        let (result_tx, result_rx): (Sender<Vec<K>>, Receiver<Vec<K>>) = unbounded();
+        let (result_tx, result_rx): (Sender<Vec<(K, V)>>, Receiver<Vec<(K, V)>>) = unbounded();
 
         {
             let result_tx = result_tx.clone();
             pool.scoped(move |s| {
-                let (buffer_tx, buffer_rx): (Sender<Vec<K>>, Receiver<Vec<K>>) = bounded(64);
+                let (buffer_tx, buffer_rx): (Sender<Vec<(K, V)>>, Receiver<Vec<(K, V)>>) = bounded(64);
                 let wg = WaitGroup::new();
                 {
                     let buffer_rx = buffer_rx.clone();
                     s.execute(move || {
-                        let mut result: Vec<K> = Vec::new();
+                        let mut result: Vec<(K, V)> = Vec::new();
                         loop {
                             select! {
                                 recv(buffer_rx) -> msg => {
@@ -224,9 +214,9 @@ impl<'a, K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> HashMap
                         let shard_handle = shard_slot.clone();
                         let buffer_tx = buffer_tx.clone();
                         s.execute(move || {
-                            let mut buffer: Vec<K> = Vec::new();
+                            let mut buffer: Vec<(K, V)> = Vec::new();
                             let _shard = shard_handle.read();
-                            (*_shard).fill_keys_into(&mut buffer);
+                            (*_shard).fill_pairs_into(&mut buffer);
 
                             _ = buffer_tx.send(buffer);
 
@@ -245,32 +235,20 @@ impl<'a, K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> HashMap
         }
     }
 
+    #[rustfmt::skip]
+    pub fn keys<'b>(&'b self) -> Vec<K>
+    where
+        K: Hash + Eq + IKey<K>,
+    {
+	self.collect().iter().map(|x| x.0.clone()).collect()
+    }
+
     pub fn pairs<'b>(&'b self) -> Vec<(K, V)>
     where
         K: Hash + Eq + IKey<K> + Clone,
         V: Clone,
     {
-        // TODO(): refactor this, remove repeated code
-        let mut result: Vec<(K, V)> = Vec::new();
-        _ = crossbeam::scope(|s| {
-            let mut handles: Vec<ScopedJoinHandle<Vec<(K, V)>>> = Vec::new();
-            for shard_slot in self.shards.iter() {
-                let shard_handle = shard_slot.clone();
-                let handle = s.spawn(move |_| {
-                    let mut buffer: Vec<(K, V)> = Vec::new();
-                    let _shard = shard_handle.read();
-                    (*_shard).fill_pairs_into(&mut buffer);
-
-                    buffer
-                });
-                handles.push(handle);
-            }
-            for handle in handles {
-                result.extend(handle.join().unwrap());
-            }
-        });
-
-        result
+        self.collect()
     }
 }
 
