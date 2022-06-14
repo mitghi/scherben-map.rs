@@ -1,6 +1,6 @@
 [package]
 name = "scherben-map"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["Milad (Mike) Taghavi <mitghi@gmail.com>"]
 license = "MIT"
@@ -22,3 +22,4 @@ fnv = "1.0.7"
 crossbeam-utils = "0.8.8"
 crossbeam = "0.8.1"
 threadpool-crossbeam-channel = "1.8.0"
+scoped_threadpool = "0.1.9"
