@@ -84,8 +84,9 @@ pub fn proc(map: Arc<dyn Adaptor<String, i64> + Sync + Send + 'static>, threads:
     for i in 0..100 {
         let map = map.clone();
         let join = thread::spawn(move || {
-            for i in 0..100 {
-                (*map).get("hello 1".to_string());
+            for i in 0..10 {
+                (*map).get("test 99".to_string());
+                (*map).insert("another hello 1".to_string(), i);
             }
         });
         joins.push(join);
