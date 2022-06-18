@@ -1,6 +1,6 @@
 [package]
 name = "scherben-map"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 authors = ["Milad (Mike) Taghavi <mitghi@gmail.com>"]
 license = "MIT"
@@ -19,3 +19,12 @@ exclude = [".gitignore"]
 hashbrown = {version = "0.12.1", features=["raw", "inline-more"]}
 parking_lot_utils = {package = "parking_lot", version = "0.12.1"}
 fnv = "1.0.7"
+
+
+[dev-dependencies]
+criterion = "0.3"
+sharded = "0.1.0"
+
+[[bench]]
+name = "bench"
+harness = false
