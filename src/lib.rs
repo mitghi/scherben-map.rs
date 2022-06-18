@@ -68,9 +68,13 @@ impl<K: Clone + Send + Sync, V: Clone + Send + Sync> Shard<K, V> {
         K: Hash + Eq + IKey<K> + Clone,
         V: Clone,
     {
-        self.table.insert(hash, (key.clone(), value), |x| {
-            make_hash(x.0.borrow().as_bytes())
-        });
+        if let Some((_, item)) = self.table.get_mut(hash, move |x| key.eq(x.0.borrow())) {
+            _ = std::mem::replace(item, value);
+        } else {
+            self.table.insert(hash, (key.clone(), value), |x| {
+                make_hash(x.0.borrow().as_bytes())
+            });
+        }
     }
 
     /// remove remove the entry associated with `key` and `hash`
@@ -355,5 +359,21 @@ mod test {
         for _shard_guard in map.into_iter() {}
         for _shard_guard in map.into_iter() {}
         for _shard_guard in map.into_iter() {}
+    }
+
+    #[test]
+    fn map_replace_item() {
+        let map: HashMap<String, i64, 8> = Default::default();
+        map.insert("Test".to_string(), 0);
+
+        let mut value = map.get_owned("Test".to_string());
+        assert_eq!(value.is_some(), true);
+        assert_eq!(value.unwrap(), 0);
+
+        map.insert("Test".to_string(), 64);
+        value = map.get_owned("Test".to_string());
+
+        assert_eq!(value.is_some(), true);
+        assert_eq!(value.unwrap(), 64);
     }
 }
