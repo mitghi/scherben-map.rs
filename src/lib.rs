@@ -1,18 +1,11 @@
-use crossbeam::{
-    channel::{bounded, unbounded, Receiver, Sender},
-    select,
-    sync::WaitGroup,
-};
 use fnv::FnvHasher;
 use hashbrown::raw::RawTable;
-use scoped_threadpool::Pool;
 use std::{
     borrow::Borrow,
     fmt,
     hash::{Hash, Hasher},
+    sync::Arc,
 };
-
-extern crate scoped_threadpool;
 
 type RwLock<T> = parking_lot_utils::RwLock<T>;
 
@@ -28,13 +21,18 @@ struct RwKey<'a, K: IKey<K>> {
     key: &'a K,
 }
 
+pub struct IntoIter<K, V> {
+    shards: std::vec::IntoIter<Arc<RwLock<Shard<K, V>>>>,
+    item: Option<Arc<RwLock<Shard<K, V>>>>,
+}
+
 pub struct HashMap<K, V, const N: usize> {
-    shards: [RwLock<Shard<K, V>>; N],
+    shards: [Arc<RwLock<Shard<K, V>>>; N],
     shards_size: u64,
 }
 
-struct Shard<K, V> {
-    table: RawTable<(K, V)>,
+pub struct Shard<K, V> {
+    pub table: RawTable<(K, V)>,
 }
 
 impl<K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> Default for HashMap<K, V, N> {
@@ -75,7 +73,7 @@ impl<K: Clone + Send + Sync, V: Clone + Send + Sync> Shard<K, V> {
         }
     }
 
-    fn fill_pairs_into(&self, buffer: &mut Vec<(K, V)>) {
+    pub fn fill_pairs_into(&self, buffer: &mut Vec<(K, V)>) {
         unsafe {
             for entry in self.table.iter() {
                 let value = entry.as_ref().clone();
@@ -103,7 +101,7 @@ impl<'a, K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> HashMap
         let shards = std::iter::repeat(|| RawTable::with_capacity(shards_size))
             .map(|f| f())
             .take(shards_size)
-            .map(|table| RwLock::new(Shard { table }))
+            .map(|table| Arc::new(RwLock::new(Shard { table })))
             .collect::<Vec<_>>()
             .try_into()
             .unwrap();
@@ -178,77 +176,37 @@ impl<'a, K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> HashMap
         self.shards.iter().map(|x| x.read().len()).sum()
     }
 
-    #[rustfmt::skip]
-    fn collect<'b>(&'b self) -> Vec<(K, V)>
-    where
-        K: Hash + Eq + IKey<K>,
-    {
-        let mut pool = Pool::new(num_cpus::get().try_into().unwrap());
-        let (result_tx, result_rx): (Sender<Vec<(K, V)>>, Receiver<Vec<(K, V)>>) = unbounded();
-
-        {
-            let result_tx = result_tx.clone();
-            pool.scoped(move |s| {
-                let (buffer_tx, buffer_rx): (Sender<Vec<(K, V)>>, Receiver<Vec<(K, V)>>) = bounded(64);
-                let wg = WaitGroup::new();
-                {
-                    let buffer_rx = buffer_rx.clone();
-                    s.execute(move || {
-                        let mut result: Vec<(K, V)> = Vec::new();
-                        loop {
-                            select! {
-                                recv(buffer_rx) -> msg => {
-                                    match msg {
-					Ok(value) => result.extend(value),
-					Err(_) => break,
-                                    }
-                                }
-                            }
-                        }
-                        _ = result_tx.send(result);
-                    });
-                }
-                {
-                    for shard_slot in self.shards.iter() {
-                        let wg = wg.clone();
-                        let shard_handle = shard_slot.clone();
-                        let buffer_tx = buffer_tx.clone();
-                        s.execute(move || {
-                            let mut buffer: Vec<(K, V)> = Vec::new();
-                            let _shard = shard_handle.read();
-                            (*_shard).fill_pairs_into(&mut buffer);
-
-                            _ = buffer_tx.send(buffer);
-
-                            drop(wg);
-                        });
-                    }
-                }
-                wg.wait();
-                drop(buffer_rx);
-            });
+    pub fn into_iter(&self) -> IntoIter<K, V> {
+        let mut shards: Vec<Arc<RwLock<Shard<K, V>>>> =
+            Vec::with_capacity(self.shards_size as usize);
+        for i in 0..self.shards.len() {
+            shards.push(self.shards[i].clone());
         }
 
-        match result_rx.recv() {
-            Ok(result) => result,
-            Err(_) => Vec::new(),
+        IntoIter {
+            shards: shards.into_iter(),
+            item: None,
         }
     }
+}
 
-    #[rustfmt::skip]
-    pub fn keys<'b>(&'b self) -> Vec<K>
-    where
-        K: Hash + Eq + IKey<K>,
-    {
-	self.collect().iter().map(|x| x.0.clone()).collect()
+impl<K, V> Iterator for IntoIter<K, V> {
+    type Item = Arc<RwLock<Shard<K, V>>>;
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.shards.size_hint().0, None)
     }
 
-    pub fn pairs<'b>(&'b self) -> Vec<(K, V)>
-    where
-        K: Hash + Eq + IKey<K> + Clone,
-        V: Clone,
-    {
-        self.collect()
+    fn next(&mut self) -> Option<Arc<RwLock<Shard<K, V>>>> {
+        match self.shards.next() {
+            Some(ref result) => {
+                self.item = Some(result.clone());
+                return self.item.clone();
+            }
+            None => {
+                self.item = None;
+                return None;
+            }
+        }
     }
 }
 
@@ -352,15 +310,15 @@ mod test {
     }
 
     #[test]
-    fn get_keys_and_pairs() {
+    fn map_iterate_shards() {
         let map: HashMap<String, i64, 8> = Default::default();
-
         for i in 0..1000 {
             let item = format!("Hallo, Welt {}!", i);
             map.insert(item, i);
         }
-
-        assert_eq!(map.len(), 1000);
-        assert_eq!(map.keys().len(), 1000);
+        for _shard_guard in map.into_iter() {}
+        for _shard_guard in map.into_iter() {}
+        for _shard_guard in map.into_iter() {}
+        for _shard_guard in map.into_iter() {}
     }
 }
