@@ -9,28 +9,36 @@ use std::{
 
 type RwLock<T> = parking_lot_utils::RwLock<T>;
 
+/// Key is trait for interval key.
 pub trait Key<K>: Hash + Eq {
     fn key(&self) -> &K;
 }
 
+/// IKey is a trait which keys must satisfy.
 pub trait IKey<K> {
     fn as_bytes(&self) -> &[u8];
 }
 
+/// RwKey is read/write key.
 struct RwKey<'a, K: IKey<K>> {
     key: &'a K,
 }
 
+/// IntoIter creates an iterator for shards.
 pub struct IntoIter<K, V> {
     shards: std::vec::IntoIter<Arc<RwLock<Shard<K, V>>>>,
     item: Option<Arc<RwLock<Shard<K, V>>>>,
 }
 
+/// HashMap is a sharded hashmap which uses `N` buckets,
+/// each protected with an Read/Write lock. `N` gets
+/// rounded to nearest power of two.
 pub struct HashMap<K, V, const N: usize> {
     shards: [Arc<RwLock<Shard<K, V>>>; N],
     shards_size: u64,
 }
 
+/// Shard embeds a table that contains key/value pair.
 pub struct Shard<K, V> {
     pub table: RawTable<(K, V)>,
 }
@@ -42,6 +50,8 @@ impl<K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> Default for
 }
 
 impl<K: Clone + Send + Sync, V: Clone + Send + Sync> Shard<K, V> {
+    /// get fetches a option containing a reference to the
+    /// value associated with the given key.
     pub fn get<'a>(&'a self, key: &K, hash: u64) -> Option<&'a V>
     where
         K: Hash + Eq + IKey<K>,
@@ -52,6 +62,7 @@ impl<K: Clone + Send + Sync, V: Clone + Send + Sync> Shard<K, V> {
         }
     }
 
+    /// insert inserts the given key/value pair into the table.
     pub fn insert(&mut self, key: &K, hash: u64, value: V)
     where
         K: Hash + Eq + IKey<K> + Clone,
@@ -62,6 +73,8 @@ impl<K: Clone + Send + Sync, V: Clone + Send + Sync> Shard<K, V> {
         });
     }
 
+    /// remove remove the entry associated with `key` and `hash`
+    /// from the table.
     pub fn remove(&mut self, key: &K, hash: u64) -> Option<V>
     where
         K: Hash + Eq + IKey<K> + Clone,
@@ -73,6 +86,8 @@ impl<K: Clone + Send + Sync, V: Clone + Send + Sync> Shard<K, V> {
         }
     }
 
+    /// fil_pairs_into fills the `buffer` with cloned entries
+    /// of key/value pairs.
     pub fn fill_pairs_into(&self, buffer: &mut Vec<(K, V)>) {
         unsafe {
             for entry in self.table.iter() {
@@ -82,6 +97,7 @@ impl<K: Clone + Send + Sync, V: Clone + Send + Sync> Shard<K, V> {
         }
     }
 
+    /// len returns the length of the table.
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.table.len()
@@ -89,14 +105,20 @@ impl<K: Clone + Send + Sync, V: Clone + Send + Sync> Shard<K, V> {
 }
 
 impl<'a, K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> HashMap<K, V, N> {
+    /// new returns an instance with `N` shards.
+    /// `N` gets rounded to nearest power of two.
     pub fn new() -> Self {
         Self::with_shard(N.next_power_of_two())
     }
 
+    /// new_arc returns a new instance contained in
+    /// an arc pointer.
     pub fn new_arc() -> std::sync::Arc<Self> {
         std::sync::Arc::new(Self::new())
     }
 
+    /// with_shard returns a new instance with `N` shards.
+    /// `N` gets rounded to nearest power of two.
     pub fn with_shard(shards_size: usize) -> Self {
         let shards = std::iter::repeat(|| RawTable::with_capacity(shards_size))
             .map(|f| f())
@@ -112,6 +134,8 @@ impl<'a, K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> HashMap
         }
     }
 
+    /// get_owned returns the cloned value associated
+    /// with the given `key`.
     pub fn get_owned(&'a self, key: K) -> Option<V>
     where
         K: Hash + Eq + IKey<K>,
@@ -129,6 +153,9 @@ impl<'a, K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> HashMap
         }
     }
 
+    /// insert inserts the given `key`, `value`
+    /// pair into a shard based on the hash value
+    /// of `key`.
     pub fn insert(&self, key: K, value: V)
     where
         K: Hash + Eq + IKey<K>,
@@ -142,6 +169,8 @@ impl<'a, K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> HashMap
         shard.insert(&key, hash, value);
     }
 
+    /// remove removes the entry associated with `key`
+    /// from the corresponding shard.
     pub fn remove(&self, key: K) -> Option<V>
     where
         K: Hash + Eq + IKey<K>,
@@ -156,6 +185,8 @@ impl<'a, K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> HashMap
         shard.remove(&key, hash)
     }
 
+    /// contains returns whether any entry is
+    /// associated with the given `key`.
     pub fn contains(&self, key: K) -> bool
     where
         K: Hash + Eq + IKey<K>,
@@ -172,10 +203,13 @@ impl<'a, K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> HashMap
         }
     }
 
+    /// len returns the sum of total number of all entries
+    /// stored in each shard table.
     pub fn len(&self) -> usize {
         self.shards.iter().map(|x| x.read().len()).sum()
     }
 
+    /// into_iter creates an iterator for shards.
     pub fn into_iter(&self) -> IntoIter<K, V> {
         let mut shards: Vec<Arc<RwLock<Shard<K, V>>>> =
             Vec::with_capacity(self.shards_size as usize);
@@ -249,6 +283,7 @@ impl<'a, K: IKey<K> + Eq> Key<K> for RwKey<'a, K> {
     }
 }
 
+/// make_hash hashes the `key`.
 fn make_hash(key: &[u8]) -> u64 {
     let mut hasher: Box<dyn Hasher> = Box::new(FnvHasher::default());
     hasher.write(key);
