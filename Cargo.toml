@@ -1,6 +1,6 @@
 [package]
 name = "scherben-map"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = ["Milad (Mike) Taghavi <mitghi@gmail.com>"]
 license = "MIT"
@@ -19,8 +19,3 @@ exclude = [".gitignore"]
 hashbrown = {version = "0.12.1", features=["raw", "inline-more"]}
 parking_lot_utils = {package = "parking_lot", version = "0.12.1"}
 fnv = "1.0.7"
-crossbeam-utils = "0.8.8"
-crossbeam = "0.8.1"
-threadpool-crossbeam-channel = "1.8.0"
-scoped_threadpool = "0.1.9"
-num_cpus = "1.13.1"
