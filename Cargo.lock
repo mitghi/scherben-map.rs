@@ -495,7 +495,7 @@ dependencies = [
 
 [[package]]
 name = "scherben-map"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "criterion",
  "fnv",
