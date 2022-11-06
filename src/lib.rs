@@ -138,6 +138,21 @@ impl<'a, K: Clone + Send + Sync, V: Clone + Send + Sync, const N: usize> HashMap
         }
     }
 
+    /// get_shard returns the shard lock along with
+    /// its hash.
+    pub fn get_shard(&'a self, key: K) -> (&'a Arc<RwLock<Shard<K, V>>>, u64)
+    where
+        K: Hash + Eq + IKey<K>,
+        V: Clone,
+    {
+        let hash: u64 = make_hash(key.as_bytes());
+        let bin = hash % self.shards_size;
+        match self.shards.get(bin as usize) {
+            Some(lock) => (lock, hash),
+            None => panic!("index out of bounds"),
+        }
+    }
+
     /// get_owned returns the cloned value associated
     /// with the given `key`.
     pub fn get_owned(&'a self, key: K) -> Option<V>
